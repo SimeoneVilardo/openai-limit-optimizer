@@ -1,0 +1,8 @@
+[project]
+name = "openai-limit-optimizer"
+version = "0.1.0"
+description = "Conservative Codex 5h-window poller: sends a fixed prompt only on a moving full-window signal."
+requires-python = ">=3.12"
+
+[tool.pytest]
+testpaths = ["tests"]

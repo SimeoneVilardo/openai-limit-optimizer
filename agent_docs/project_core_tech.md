@@ -1,0 +1,36 @@
+# Core Tech — openai-limit-optimizer
+
+Task ID: `openai_limit_optimizer_20260912_docs`
+
+## Stack verificato (lettura sorgente)
+- Linguaggio: Python `>=3.12` (`pyproject.toml`), **solo stdlib** (nessuna dipendenza runtime; test via `python -m unittest`, nessun pytest).
+- Versione app `0.1.0` (`app/main.py APP_VERSION`, `pyproject.toml`).
+- Checksum sha256 verificati 2026-09-12: `Dockerfile 6b822b5a…c70ac6`,
+  `compose.yaml 63032da1…4e6d7cf`, `app/main.py f1e3b610…126638`,
+  `app/policy.py dc7e5743…61540afb`, `app/protocol.py a001eaf6…d2c7180c`,
+  `app/send.py a2684702…00e9ce276f`, `app/state.py cbe569f8…57ffa057`,
+  `app/config.py b9ee761d…90661ad7e` (primi/ultimi 8 hex; elenco completo nei log di verifica).
+- Runtime pin: `Dockerfile` → `python:3.14-slim-bookworm`, `--platform=linux/amd64`, Codex CLI **0.154.0** (tarball musl ufficiale), `codex --version` verificato in build come `appuser`; user `65532:65532`, `CODEX_HOME=/data/codex`.
+- Compose image-only (`compose.yaml`): default `simeonevilardo/openai-limit-optimizer:latest`, override via `OLO_IMAGE` (anche digest); comandi `daemon` di default; `read_only:true`, `no-new-privileges`, `cap_drop: ALL`, tmpfs `/tmp` + cache, volumi `${OLO_DATA_DIR:-./data}:/data`, healthcheck `python -m app.main healthcheck`, restart `unless-stopped`.
+- Bootstrap home condiviso (`protocol.ensure_codex_home`, usato da daemon/check/login): crea `CODEX_HOME` 0700 se assente, ne impone 0700+writable, altrimenti `HomeError` fail-closed. Risolve in sorgente la causa missing-home vista nello smoke preflight; nuova build immagine in attesa — stato operativo canonico in `project_progress.md`.
+
+## Contratti esatti (nomi env, da `app/config.py` + `compose.yaml`)
+- App (`OLO_*`, tutti via environment, esempio in `config/example.env`): `OLO_POLL_SECONDS` (600; 60–86400), `OLO_CONFIRM_SECONDS` (30; 21–600), `OLO_MODEL` (`gpt-5.6-luna`), `OLO_EFFORT` (`low` ∈ minimal/low/medium/high/xhigh), `OLO_PROMPT` (`Answer only with "hi"`, ≤500ch), `OLO_CODEX_BIN` (`codex`), `OLO_CODEX_HOME` (`/data/codex`), `OLO_STATE_FILE` (`/data/state.json`), `OLO_HEARTBEAT_FILE` (`/data/heartbeat.json`), `OLO_RPC_TIMEOUT` (60; 5–300), `OLO_SEND_TIMEOUT` (300; 30–1800), `OLO_COOLDOWN_SECONDS` (18000; floor 18000–86400).
+- Costanti pin non configurabili: `tolerance 5s`, `window 300min`, `full 18000s`.
+- Path fail-closed: assoluti, distinti, journal mai dentro `CODEX_HOME`; cooldown <18000 rifiutato.
+- Compose-only: `OLO_IMAGE`, `OLO_DATA_DIR` (`./data`), `OLO_UID`/`OLO_GID` (65532).
+- Chiavi sanificate mai ereditate dai figli (`protocol.child_env`): `OPENAI_API_KEY, CODEX_API_KEY, CODEX_ACCESS_TOKEN, OPENAI_BASE_URL, OPENAI_ORGANIZATION, OPENAI_PROJECT, CODEX_OSS_BASE_URL, CODEX_OSS_PORT`.
+
+## Sottosistemi (verificati nei sorgenti)
+- Protocollo (`app/protocol.py`): stdio NDJSON su `codex app-server` — `initialize`+`initialized`, `account/read`, `account/rateLimits/read` (`excludeResetCreditDetails:true`, `supportsLunaReserve:false`), `model/list` paginato; gate `ensure_model` (id + effort esatti); `is_chatgpt_account` solo `type==chatgpt`. Errori sanificati a codici fissi.
+- Policy (`app/policy.py`, pura fail-closed): vedi overview; parsing `rateLimitsByLimitId.codex` autorevole (manca ⇒ reject), fallback `rateLimits` solo se `limitId` assente/`codex`; validazione strict (PolicyError ⇒ no send); `decide()` richiede doppio full-window + `resets` mobile + coerenza orologi + nessun blocco extra.
+- Send (`app/send.py`, unica via inferenziale): argv esatto `codex exec --ephemeral --json --sandbox read-only --skip-git-repo-check --ignore-user-config --ignore-rules --disable shell_tool -C <tmpdir-vuoto> -m <model> -c model_reasoning_effort=<effort> -c web_search="disabled" <prompt|->`; prompt con `-` iniziale via stdin; no retry flag (inesistente su exec per auth ChatGPT); system prompt base inevitabile; env sanificato; drain con cap + deadline monotona + process-group reap. Correzione: `--ignore-user-config` salta solo layer `config.toml` utente e regole repo — **non** le istruzioni tipo `AGENTS.md`, tenute fuori via `-C` tmpdir vuoto; il `CODEX_HOME` dedicato deve restare privo di `AGENTS.md`/skill/MCP/`config.toml`.
+- Stato (`app/state.py`): journal flock non-bloccante su `<state>.lock` (daemon/login/check lo tengono per tutta la vita ⇒ **stop daemon prima di check/once/login**, restart dopo); `record_attempt_before` (outcome `pending`) **prima** del send, poi `record_outcome`; cooldown da ogni attempt; scritture atomiche tmp+fsync+rename 0600, dir 0700; schema strict (file assente=uninitialized, `{}`/tipi errati=corrupt ⇒ fail closed; corrupt **non** si ripara con re-login e **mai** cancellare/resettare — causerebbe un repeat send).
+- Entrypoint (`app/main.py`): `daemon [--once] [--dry-run]`; `check [--dry-run]` → `{"ok","allow","effective_allow","reason","cooldown_remaining_s"}`, valida il journal (corrupt ⇒ `state-corrupt`), tiene il lock, **non** scrive il journal ma `ensure_codex_home` e cache/auth sotto `CODEX_HOME` possono scrivere; `effective_allow = allow AND cooldown==0`. `login` (`codex login --device-auth -c cli_auth_credentials_store="file"` + `login status`); `healthcheck` (0 healthy / 1 degraded-blocked / 2 stale-corrupt, legge solo l'heartbeat); log JSON strutturati senza payload/token/prompt.
+
+## Pin upstream (fonti dichiarate, non vendored)
+- `https://raw.githubusercontent.com/openai/codex/rust-v0.154.0/codex-rs/app-server-protocol/src/protocol/v2/account.rs`
+- `https://raw.githubusercontent.com/openai/codex/rust-v0.154.0/codex-rs/backend-client/src/client.rs`
+
+## Test (verificati in locale via stdlib)
+- `python -m unittest discover -s tests -t .` → **132 test OK** (78 unit + 54 acceptance), 2026-09-12.

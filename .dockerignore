@@ -1,0 +1,7 @@
+.git/
+agent_docs/
+data/
+tests/
+__pycache__/
+*.pyc
+.env

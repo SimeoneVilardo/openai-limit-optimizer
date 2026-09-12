@@ -1,0 +1,48 @@
+# Image-only compose: no local build. Override the image (or pin a digest)
+# via OLO_IMAGE, e.g. OLO_IMAGE=simeonevilardo/openai-limit-optimizer@sha256:<digest>.
+# Persistent state + Codex credentials live in the bound /data directory.
+# One-time device login:  docker compose run --rm app login
+name: openai-limit-optimizer
+
+services:
+  app:
+    image: ${OLO_IMAGE:-simeonevilardo/openai-limit-optimizer:latest}
+    command: ["daemon"]
+    environment:
+      OLO_POLL_SECONDS: ${OLO_POLL_SECONDS:-600}
+      OLO_CONFIRM_SECONDS: ${OLO_CONFIRM_SECONDS:-30}
+      OLO_MODEL: ${OLO_MODEL:-gpt-5.6-luna}
+      OLO_EFFORT: ${OLO_EFFORT:-low}
+      OLO_PROMPT: ${OLO_PROMPT:-Answer only with "hi"}
+      OLO_CODEX_BIN: codex
+      OLO_CODEX_HOME: /data/codex
+      OLO_STATE_FILE: /data/state.json
+      OLO_HEARTBEAT_FILE: /data/heartbeat.json
+      OLO_RPC_TIMEOUT: ${OLO_RPC_TIMEOUT:-60}
+      OLO_SEND_TIMEOUT: ${OLO_SEND_TIMEOUT:-300}
+      OLO_COOLDOWN_SECONDS: ${OLO_COOLDOWN_SECONDS:-18000}
+    volumes:
+      - ${OLO_DATA_DIR:-./data}:/data
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /home/appuser/.cache:size=32m,mode=700,uid=65532,gid=65532
+    read_only: true
+    user: ${OLO_UID:-65532}:${OLO_GID:-65532}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.main", "healthcheck"]
+      interval: 5m
+      timeout: 30s
+      start_period: 2m
+      retries: 2
