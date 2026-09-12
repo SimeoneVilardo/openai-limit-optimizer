@@ -32,6 +32,11 @@ digest via `OLO_IMAGE=...@sha256:<digest>`). Stato e credenziali vivono in
 
 ## Login device (dedicato, non copiare il desktop)
 
+Prerequisito (l'utente l'ha incontrato e poi risolto): abilitare prima in
+ChatGPT **Settings > Security** l'autenticazione tramite codice device;
+in alternativa farsela abilitare dall'amministratore del workspace. Senza
+questa impostazione il flow fallisce con un errore esplicito del provider.
+
 Il daemon tiene il lock di stato per tutta la vita: **fermalo prima** di
 `login`, `check` e `daemon --once`, poi riavvialo.
 

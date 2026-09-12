@@ -7,7 +7,7 @@ Task ID: `openai_limit_optimizer_20260912_docs`
 - Implementato: daemon Python stdlib-only v0.1.0 (`app/`), `Dockerfile` + `compose.yaml` image-only, `config/example.env`, test `tests/unit` + `tests/acceptance`.
 - Comportamento: poll conservativo della finestra Codex 5h; invia `OLO_PROMPT` via sessione effimera **solo** su segnale moving-full-window a due letture. Default in `app/config.py`: poll 600s, confirm 30s, model `gpt-5.6-luna`, effort `low`, prompt `Answer only with "hi"`, cooldown 18000s.
 - Test: `python -m unittest discover -s tests -t .` → **132 OK** (78 unit + 54 acceptance), verificato dall'Archivista.
-- Causa missing-home dello smoke preflight risolta in sorgente (`protocol.ensure_codex_home` condiviso daemon/check/login); nuova build immagine in attesa.
+- Causa missing-home dello smoke preflight risolta in sorgente (`protocol.ensure_codex_home` condiviso daemon/check/login). Release/commit/digest/deploy: canonici in `project_progress.md`.
 - Stato operativo (build/push/deploy): canonico in `project_progress.md` (main-owned), non duplicato qui né in README.
 
 ## Policy (sintesi; canonico in `project_core_tech.md`)

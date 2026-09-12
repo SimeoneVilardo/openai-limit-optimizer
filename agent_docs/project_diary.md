@@ -9,3 +9,5 @@
 - Integration review caught gaps that initial mock tests missed: ineffective command locking, missing device-login flag, unsupported-effort validation, blocking/unsafe process IO, misleading health, permissive journal/schema parsing and container startup. Added real subprocess acceptance tests and focused repairs before release.
 - An empty bind mount hides image-created `/data/codex`; startup now creates it privately before read-only authentication checks.
 - Local Docker socket is unavailable to the user. Build on homelab through `DOCKER_HOST=ssh://homelab.lan`, preserving SSH verification and using registry credentials from the local client without copying credential stores.
+- Device-code login requires enabling the corresponding ChatGPT security setting first. User hit this explicit provider error, enabled it and successfully authenticated; document the prerequisite before the command.
+- Final acceptance separates delivered/running service from unobserved optimization effectiveness: verified authenticated active-window skip, never forced an inference to make an end-to-end test appear complete.
