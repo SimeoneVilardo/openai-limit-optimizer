@@ -1,172 +1,172 @@
 # openai-limit-optimizer
 
-Poller Docker conservativo della finestra Codex da 5h: invia il prompt
-configurato via sessione effimera **solo** su segnale moving-full-window
-a due letture. Di default non fa nulla (skip) e resta in cooldown 5h dopo
-ogni tentativo.
+Conservative 5h Codex window poller: it sends the configured prompt via an
+ephemeral session **only** on a moving-full-window signal at two readings.
+By default it does nothing (skip) and stays in 5h cooldown after each
+attempt.
 
-## Requisiti
+## Requirements
 
-- Docker + Compose v2, immagine `simeonevilardo/openai-limit-optimizer`.
-- Nessuna API key: l'auth è ChatGPT via login device dedicato.
-- Solo stdlib Python: nessun `pytest` richiesto per i test.
+- Docker + Compose v2, image `simeonevilardo/openai-limit-optimizer`.
+- No API key: auth is ChatGPT via dedicated device login.
+- Stdlib-only Python: no `pytest` required for tests.
 
 ## Setup
 
 ```bash
 cp config/example.env .env
-# edita .env se serve (vedi Config), poi verifica il parent e crea ./data
-# con l'owner atteso dal container (65532:65532):
+# edit .env if needed (see Config), then verify the parent and create ./data
+# with the owner expected by the container (65532:65532):
 ls -d .
 sudo install -d -m 0700 -o 65532 -g 65532 ./data
 docker compose up -d
 docker compose logs -f app
 ```
 
-`mkdir ./data` come utente host assegna l'uid sbagliato e il daemon
-`65532:65532` non può scriverci: usare `install` sopra. `compose.yaml` è
-image-only (`${OLO_IMAGE:-simeonevilardo/openai-limit-optimizer:latest}`;
-digest via `OLO_IMAGE=...@sha256:<digest>`). Stato e credenziali vivono in
+`mkdir ./data` as the host user assigns the wrong uid and the
+`65532:65532` daemon cannot write there: use the `install` above.
+`compose.yaml` is image-only
+(`${OLO_IMAGE:-simeonevilardo/openai-limit-optimizer:latest}`;
+digest via `OLO_IMAGE=...@sha256:<digest>`). State and credentials live in
 `${OLO_DATA_DIR:-./data} → /data` (`state.json`, `heartbeat.json`,
-`codex/`): non committarli, tienili privati.
+`codex/`): do not commit them, keep them private.
 
-## Login device (dedicato, non copiare il desktop)
+## Device login (dedicated, do not copy the desktop)
 
-Prerequisito (l'utente l'ha incontrato e poi risolto): abilitare prima in
-ChatGPT **Settings > Security** l'autenticazione tramite codice device;
-in alternativa farsela abilitare dall'amministratore del workspace. Senza
-questa impostazione il flow fallisce con un errore esplicito del provider.
+Prerequisite (the user hit this and then resolved it): first enable
+device-code authentication in ChatGPT **Settings > Security**;
+alternatively have it enabled by the workspace administrator. Without
+this setting the flow fails with an explicit provider error.
 
-Il daemon tiene il lock di stato per tutta la vita: **fermalo prima** di
-`login`, `check` e `daemon --once`, poi riavvialo.
+The daemon holds the state lock for its whole lifetime: **stop it first**
+before `login`, `check` and `daemon --once`, then restart it.
 
 ```bash
 docker compose stop app
 docker compose run --rm app login
-# completa il device flow, poi verifica a daemon fermo:
+# complete the device flow, then verify with the daemon stopped:
 docker compose run --rm app check
 docker compose up -d
 ```
 
-Dopo `login` usare `check`, non `healthcheck`: l'heartbeat è scritto solo
-dal daemon, quindi `healthcheck` prima dell'avvio leggerebbe un file
-vecchio/assente. Dettagli (`app/main.py`): `codex login --device-auth -c
-cli_auth_credentials_store="file"` contro il `CODEX_HOME` dedicato
-(`/data/codex`), poi `codex login status`. Il refresh persiste su disco,
-ma revoca o policy del provider possono richiedere un nuovo login:
-nessuna garanzia "una volta per sempre".
+After `login` use `check`, not `healthcheck`: the heartbeat is written only
+by the daemon, so `healthcheck` before startup would read a stale/missing
+file. Details (`app/main.py`): `codex login --device-auth -c
+cli_auth_credentials_store="file"` against the dedicated `CODEX_HOME`
+(`/data/codex`), then `codex login status`. The refresh persists on disk,
+but provider revocation or policy may require a new login:
+no "once forever" guarantee.
 
-## Compose / avvio
+## Compose / startup
 
 ```bash
 docker compose up -d
 docker compose logs -f app
-# singolo ciclo senza invio (a daemon fermo):
+# single cycle without sending (with the daemon stopped):
 docker compose stop app
 docker compose run --rm app daemon --once --dry-run
-# decisione singola (a daemon fermo):
+# single decision (with the daemon stopped):
 docker compose stop app
 docker compose run --rm app check
-# heartbeat (legge il file, daemon anche attivo):
+# heartbeat (reads the file, daemon may be running):
 docker compose run --rm app healthcheck
 docker compose up -d
 ```
 
-## Config (tutto via environment, vedi `config/example.env`)
+## Config (all via environment, see `config/example.env`)
 
-| Var | Default | Note |
+| Var | Default | Notes |
 |---|---|---|
 | `OLO_POLL_SECONDS` | `600` | 60–86400 |
-| `OLO_CONFIRM_SECONDS` | `30` | 21–600, separazione tra le 2 letture |
-| `OLO_MODEL` | `gpt-5.6-luna` | id esatto verificato su `model/list` |
+| `OLO_CONFIRM_SECONDS` | `30` | 21–600, gap between the 2 readings |
+| `OLO_MODEL` | `gpt-5.6-luna` | exact id verified on `model/list` |
 | `OLO_EFFORT` | `low` | minimal/low/medium/high/xhigh |
-| `OLO_PROMPT` | `Answer only with "hi"` | ≤500ch |
+| `OLO_PROMPT` | `Answer only with "hi"` | ≤500 chars |
 | `OLO_RPC_TIMEOUT` | `60` | 5–300 |
 | `OLO_SEND_TIMEOUT` | `300` | 30–1800 |
-| `OLO_COOLDOWN_SECONDS` | `18000` | floor 18000, non negoziabile |
+| `OLO_COOLDOWN_SECONDS` | `18000` | floor 18000, non-negotiable |
 | `OLO_CODEX_BIN` | `codex` | |
-| `OLO_CODEX_HOME` | `/data/codex` | assoluto, dedicato |
-| `OLO_STATE_FILE` | `/data/state.json` | assoluto, mai dentro `CODEX_HOME` |
-| `OLO_HEARTBEAT_FILE` | `/data/heartbeat.json` | idem |
-| `OLO_IMAGE` / `OLO_DATA_DIR` / `OLO_UID` / `OLO_GID` | `…:latest` / `./data` / `65532` | solo compose |
+| `OLO_CODEX_HOME` | `/data/codex` | absolute, dedicated |
+| `OLO_STATE_FILE` | `/data/state.json` | absolute, never inside `CODEX_HOME` |
+| `OLO_HEARTBEAT_FILE` | `/data/heartbeat.json` | same |
+| `OLO_IMAGE` / `OLO_DATA_DIR` / `OLO_UID` / `OLO_GID` | `…:latest` / `./data` / `65532` | compose only |
 
-Costanti pin (non configurabili): tolleranza 5s, finestra 300min, full 18000s.
+Pinned constants (not configurable): 5s tolerance, 300min window, 18000s full.
 
 ## Commands
 
-- `daemon [--once] [--dry-run]`: loop di poll; `--dry-run` logga `would-send` senza inviare; tiene il lock di stato per tutta la vita.
-- `check [--dry-run]`: una poll+decisione `{"ok","allow","effective_allow","reason","cooldown_remaining_s"}`; valida il journal (cooldown + corrupt) e tiene il lock; **non** scrive il journal, ma può creare/sistemare `CODEX_HOME` (0700) e la cache/auth sotto `CODEX_HOME` può essere scritta dal server. `effective_allow` è `allow AND cooldown==0`: è ciò che il daemon farebbe.
-- `login`: flow device sopra; tiene il lock.
-- `healthcheck`: legge l'heartbeat (`healthy/degraded/blocked_auth/error` + `ts_wall`); exit 0/1/2.
+- `daemon [--once] [--dry-run]`: poll loop; `--dry-run` logs `would-send` without sending; holds the state lock for its whole lifetime.
+- `check [--dry-run]`: one poll+decision `{"ok","allow","effective_allow","reason","cooldown_remaining_s"}`; validates the journal (cooldown + corrupt) and holds the lock; does **not** write the journal, but may create/fix `CODEX_HOME` (0700) and the cache/auth under `CODEX_HOME` may be written by the server. `effective_allow` is `allow AND cooldown==0`: what the daemon would do.
+- `login`: device flow above; holds the lock.
+- `healthcheck`: reads the heartbeat (`healthy/degraded/blocked_auth/error` + `ts_wall`); exit 0/1/2.
 
 ## Test
 
-Solo stdlib, nessun pytest:
+Stdlib only, no pytest:
 
 ```bash
 python -m unittest discover -s tests -t .
 ```
 
-132 test (78 unit + 54 acceptance), verificati in locale con esito OK.
+132 tests (78 unit + 54 acceptance), verified locally with OK result.
 
 ## Security
 
-- Utente `65532:65532`, `read_only:true`, `no-new-privileges`, `cap_drop: ALL`, tmpfs dedicate, nessuna porta pubblicata.
-- Figli sanificati (`OPENAI_API_KEY, CODEX_API_KEY, CODEX_ACCESS_TOKEN,
+- User `65532:65532`, `read_only:true`, `no-new-privileges`, `cap_drop: ALL`, dedicated tmpfs, no published ports.
+- Sanitized children (`OPENAI_API_KEY, CODEX_API_KEY, CODEX_ACCESS_TOKEN,
   OPENAI_BASE_URL, OPENAI_ORGANIZATION, OPENAI_PROJECT, CODEX_OSS_BASE_URL,
-  CODEX_OSS_PORT` rimossi): nessun fallback a fatturazione a chiavi, nessun
-  provider alternativo, `supportsLunaReserve=false`, nessun riscatto crediti.
-- Send effimero minimo: `--ephemeral --json --sandbox read-only
+  CODEX_OSS_PORT` removed): no key-billing fallback, no alternative
+  provider, `supportsLunaReserve=false`, no credit redemption.
+- Minimal ephemeral send: `--ephemeral --json --sandbox read-only
   --skip-git-repo-check --ignore-user-config --ignore-rules --disable
-  shell_tool -C <tmpdir-vuoto> -m <model> -c model_reasoning_effort=<effort>
-  -c web_search="disabled"`; prompt con `-` iniziale via stdin.
-  `--ignore-user-config` salta il layer `config.toml` utente e le regole
-  repo, ma **non** disabilita le istruzioni globali tipo `AGENTS.md`:
-  quelle restano fuori grazie a `-C` su tmpdir vuoto. Il `CODEX_HOME`
-  dedicato deve restare privo di `AGENTS.md`, skill, MCP e `config.toml`
-  (dovere dell'operatore: solo assenza, nessun codice).
-- Log JSON su singola riga senza payload/token/account/prompt; journal e
-  heartbeat `0600`, dir `0700`.
+  shell_tool -C <empty-tmpdir> -m <model> -c model_reasoning_effort=<effort>
+  -c web_search="disabled"`; prompt with leading `-` via stdin.
+  `--ignore-user-config` skips the user `config.toml` layer and repo rules,
+  but does **not** disable global instructions such as `AGENTS.md`:
+  those stay out thanks to `-C` on an empty tmpdir. The dedicated
+  `CODEX_HOME` must stay free of `AGENTS.md`, skills, MCP and `config.toml`
+  (operator duty: absence only, no code).
+- Single-line JSON logs without payload/token/account/prompt; journal and
+  heartbeat `0600`, dirs `0700`.
 
-## Troubleshoot
+## Troubleshooting
 
 - `blocked_auth / auth-missing` → stop daemon, `login`, `check`, restart.
-- `degraded poll-failed / schema-rejected` → attendi il ciclo dopo; se persiste, `check` a daemon fermo e log strutturati.
-- `state-locked` → un altro comando tiene il lock: ferma il daemon e riprova.
-- `state-corrupt` → **non** si risolve con re-login e **non** cancellare/resettare il journal (un reset permetterebbe un secondo send nel cooldown): preserva il file, fanne backup, indaga la causa, poi riparti solo da uno stato valido.
-- `stale heartbeat` / exit 2 → ispeziona `./data/*.json` (non condividerne il contenuto), verifica che il daemon stia girando.
-- `cooldown` / `cooldown-after-failure`: normale — ogni tentativo (anche failed) blocca per `OLO_COOLDOWN_SECONDS`; un failure resta degraded per tutto il cooldown.
-- `would-send` in dry-run: la policy matcherebbe, nessun invio eseguito.
+- `degraded poll-failed / schema-rejected` → wait for the next cycle; if it persists, `check` with the daemon stopped and structured logs.
+- `state-locked` → another command holds the lock: stop the daemon and retry.
+- `state-corrupt` → it is **not** fixed by re-login and do **not** delete/reset the journal (a reset would allow a second send within the cooldown): preserve the file, back it up, investigate the cause, then restart only from a valid state.
+- `stale heartbeat` / exit 2 → inspect `./data/*.json` (do not share their content), verify the daemon is running.
+- `cooldown` / `cooldown-after-failure`: normal — every attempt (even failed) locks for `OLO_COOLDOWN_SECONDS`; a failure stays degraded for the whole cooldown.
+- `would-send` in dry-run: the policy would match, no send performed.
 
-## Limiti espliciti
+## Explicit limits
 
-- Doppia lettura: entrambe finestre fresche `resetsAt-wall = 18000±5s`,
-  `resetsAt` deve **avanzare** con l'elapsed, wall/mono d'accordo,
-  `ordinaryUsageAllowed==True`, bucket `codex` 300min/0%, nessun esaurimento
-  weekly/spend/reached. `resetsAt` null/scaduto/forma diversa o `0%`
-  mid-window ⇒ skip.
-- `usedPercent==0` **non** prova inattività reale (arrotondamento `i32`):
-  euristica conservativa, non flag/garanzia API. Inattività live non osservata.
-- Il ping consuma comunque quota (non gratis, non a contesto zero: system
-  prompt base inevitabile, usage tiny). Può consumare weekly anche se
-  inutilizzato; nessuna garanzia che ogni inizio lavoro sia <5h o che la
-  quota sia illimitata. Nessun fallback automatico costoso.
+- Double reading: both windows fresh `resetsAt-wall = 18000±5s`,
+  `resetsAt` must **advance** with the elapsed time, wall/mono in agreement,
+  `ordinaryUsageAllowed==True`, `codex` 300min/0% bucket, no weekly/spend/reached
+  exhaustion. Null/expired/differently-shaped `resetsAt` or mid-window `0%`
+  ⇒ skip.
+- `usedPercent==0` does **not** prove real inactivity (`i32` rounding):
+  conservative heuristic, not an API flag/guarantee. Live inactivity not observed.
+- The ping still consumes quota (not free, not zero-context: unavoidable base
+  system prompt, tiny usage). It may consume weekly quota even when unused;
+  no guarantee that every work start is <5h away or that quota is unlimited.
+  No costly automatic fallback.
 
 ## Build image
 
 `Dockerfile`: `python:3.14-slim-bookworm` amd64 + Codex CLI **0.154.0**
-pinnato (tarball musl ufficiale), verificato come `appuser`. Build
-generica:
+pinned (official musl tarball), verified as `appuser`. Generic build:
 
 ```bash
 docker build -t simeonevilardo/openai-limit-optimizer:latest .
-# oppure con digest pin in compose: OLO_IMAGE=simeonevilardo/openai-limit-optimizer@sha256:<digest>
+# or with digest pin in compose: OLO_IMAGE=simeonevilardo/openai-limit-optimizer@sha256:<digest>
 ```
 
-Lo stato operativo (quali build/push/deploy risultano fatti) vive in
-`agent_docs/project_progress.md`, non qui.
+Operational state (which builds/pushes/deploys were done) lives in
+`agent_docs/project_progress.md`, not here.
 
-Pin upstream (non vendored):
+Upstream pins (not vendored):
 
 - `https://raw.githubusercontent.com/openai/codex/rust-v0.154.0/codex-rs/app-server-protocol/src/protocol/v2/account.rs`
 - `https://raw.githubusercontent.com/openai/codex/rust-v0.154.0/codex-rs/backend-client/src/client.rs`
