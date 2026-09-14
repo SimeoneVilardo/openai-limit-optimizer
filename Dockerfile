@@ -13,7 +13,7 @@ ENV CODEX_VERSION=0.154.0 \
 # id 385887902, asset id 553706458, rust-v0.154.0): verified below
 # with sha256sum before extraction. Fails the build on mismatch.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates curl tzdata \
     && curl -fsSL -o /tmp/codex.tar.gz "https://github.com/openai/codex/releases/download/rust-v0.154.0/${CODEX_TARBALL}" \
     && echo "${CODEX_SHA256}  /tmp/codex.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/codex.tar.gz -C /tmp \

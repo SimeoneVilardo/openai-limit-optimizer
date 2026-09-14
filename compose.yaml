@@ -18,6 +18,9 @@ services:
       OLO_CODEX_HOME: /data/codex
       OLO_STATE_FILE: /data/state.json
       OLO_HEARTBEAT_FILE: /data/heartbeat.json
+      OLO_RESET_TIMES: ${OLO_RESET_TIMES:-}
+      OLO_RESET_TIMEZONE: ${OLO_RESET_TIMEZONE:-UTC}
+      OLO_SCHEDULE_FILE: /data/schedule.json
       OLO_RPC_TIMEOUT: ${OLO_RPC_TIMEOUT:-60}
       OLO_SEND_TIMEOUT: ${OLO_SEND_TIMEOUT:-300}
       OLO_COOLDOWN_SECONDS: ${OLO_COOLDOWN_SECONDS:-18000}

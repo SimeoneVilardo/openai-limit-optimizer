@@ -1,5 +1,25 @@
 # Project Diary
 
+## 2026-09-14 — recovery completed and full-loop acceptance
+
+- Treat terminal workflow errors as evidence to investigate, not an excuse to abandon the user's feature. Sanitized logs identified a provider-header timeout misclassified as unknown; a separately delegated repair and independent gate enabled controlled same-child continuation. Workflow implementation details are canonical in the global OpenCode framework.
+- Require full daemon-loop fake-clock tests for wakeup/timing claims. Isolated `_cycle` calls at chosen timestamps did not prove the poll600 wake path; `once=True` did not exercise corrupt-start recovery across iterations. Exact-boundary assertions must not allow an early send.
+- A preconfirmation straddling an active→idle reset can correctly fail policy. Permit one fresh pair when it fits the target grace, retaining all safety checks; never retry an inference attempt. Bound that retry to the original boundary plan so ordinary intermediate denials cannot hold the client until a target hours away.
+- Final independent suite is green (190 total). Automated fake-client evidence does not establish live backend idle semantics or exact reset timing. Source acceptance is separate from image release/deployment and from activating a changed OpenCode plugin.
+
+## 2026-09-14 — scheduling implementation and acceptance hold
+
+- Keep reset scheduling separate from the conservative upstream idle detector and durable attempt journal: scheduling can veto an attempt, never authorize one past the safety gates. Intermediate attempts are useful only if their full configured cooldown fits before the next activation.
+- Runtime overrides need a separate lock/file so commands can operate without stopping the daemon or interfering with OAuth/journal locking. `clear` persistently disables targets; `reset` restores environment configuration. Read-only journal inspection for `schedule show` is permitted to make feasibility reporting useful.
+- Local target occurrences use IANA rules; subtract five hours in UTC elapsed seconds. Skip nonexistent local times and use only the first ambiguous occurrence. Timing remains best effort, not a backend reset guarantee.
+- Planner tests and mocked policy acceptance missed integration defects: corrupt-start initialization, failure heartbeat masking, stale check/dry-run decisions, confirmation timing, excessive target enumeration and filesystem aliases. Executor repaired these; final independent regression coverage is still required. Do not equate a green preexisting suite with verified repairs.
+- Terminal tester dispatcher `unknown` stopped the worker (confirmed). Preserve work and block acceptance instead of locally retrying providers or substituting main-agent testing on Heavy.
+
+## 2026-09-14 — reset scheduling entry blocked
+
+- Heavy Companion launch failed with terminal dispatcher control error `stop_unconfirmed`, not a confirmed provider quota failure. Do not retry locally, override the fallback chain, or substitute main-agent production/testing for required delegation.
+- Feature request retained in progress/handoff; no scheduling design or implementation accepted. Existing conservative send gates and durable cooldown must remain constraints when work resumes.
+
 ## 2026-09-12 — conservative automation design
 
 - Greenfield repository; initialized the six-document framework before implementation.

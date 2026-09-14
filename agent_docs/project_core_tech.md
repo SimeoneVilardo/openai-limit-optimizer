@@ -1,15 +1,15 @@
 # Core Tech — openai-limit-optimizer
 
-Task ID: `openai_limit_optimizer_20260912_docs`
+Task ID: `reset_target_recovery_20260914_closure` (continuation `ses_f5f21e9e2ffeAXPqUpOluHg866`; prior blocked/164 notes historical and superseded).
 
 ## Stack verificato (lettura sorgente)
 - Linguaggio: Python `>=3.12` (`pyproject.toml`), **solo stdlib** (nessuna dipendenza runtime; test via `python -m unittest`, nessun pytest).
 - Versione app `0.1.0` (`app/main.py APP_VERSION`, `pyproject.toml`).
-- Checksum sha256 verificati 2026-09-12: `Dockerfile 6b822b5a…c70ac6`,
+- Checksum sha256 verificati 2026-09-12 (STORICI, pre-schedule — non implicano gli hash correnti; snapshot completo solo nei log di verifica di allora): `Dockerfile 6b822b5a…c70ac6`,
   `compose.yaml 63032da1…4e6d7cf`, `app/main.py f1e3b610…126638`,
   `app/policy.py dc7e5743…61540afb`, `app/protocol.py a001eaf6…d2c7180c`,
   `app/send.py a2684702…00e9ce276f`, `app/state.py cbe569f8…57ffa057`,
-  `app/config.py b9ee761d…90661ad7e` (primi/ultimi 8 hex; elenco completo nei log di verifica).
+  `app/config.py b9ee761d…90661ad7e` (primi/ultimi 8 hex). Nessun checksum corrente verificato per i file modificati/nuovi di questo deployment.
 - Runtime pin: `Dockerfile` → `python:3.14-slim-bookworm`, `--platform=linux/amd64`, Codex CLI **0.154.0** (tarball musl ufficiale), `codex --version` verificato in build come `appuser`; user `65532:65532`, `CODEX_HOME=/data/codex`.
 - Compose image-only (`compose.yaml`): default `simeonevilardo/openai-limit-optimizer:latest`, override via `OLO_IMAGE` (anche digest); comandi `daemon` di default; `read_only:true`, `no-new-privileges`, `cap_drop: ALL`, tmpfs `/tmp` + cache, volumi `${OLO_DATA_DIR:-./data}:/data`, healthcheck `python -m app.main healthcheck`, restart `unless-stopped`.
 - Bootstrap home condiviso (`protocol.ensure_codex_home`, usato da daemon/check/login): crea `CODEX_HOME` 0700 se assente, ne impone 0700+writable, altrimenti `HomeError` fail-closed. Risolve in sorgente la causa missing-home vista nello smoke preflight. Release/commit/digest/deploy: canonici in `project_progress.md`.
@@ -19,7 +19,8 @@ Task ID: `openai_limit_optimizer_20260912_docs`
 - Costanti pin non configurabili: `tolerance 5s`, `window 300min`, `full 18000s`.
 - Path fail-closed: assoluti, distinti, journal mai dentro `CODEX_HOME`; cooldown <18000 rifiutato.
 - Compose-only: `OLO_IMAGE`, `OLO_DATA_DIR` (`./data`), `OLO_UID`/`OLO_GID` (65532).
-- Chiavi sanificate mai ereditate dai figli (`protocol.child_env`): `OPENAI_API_KEY, CODEX_API_KEY, CODEX_ACCESS_TOKEN, OPENAI_BASE_URL, OPENAI_ORGANIZATION, OPENAI_PROJECT, CODEX_OSS_BASE_URL, CODEX_OSS_PORT`.
+ - Chiavi sanificate mai ereditate dai figli (`protocol.child_env`): `OPENAI_API_KEY, CODEX_API_KEY, CODEX_ACCESS_TOKEN, OPENAI_BASE_URL, OPENAI_ORGANIZATION, OPENAI_PROJECT, CODEX_OSS_BASE_URL, CODEX_OSS_PORT`.
+- Schedule (`app/schedule.py` nuovo, `app/config.py`/`app/main.py`/`compose.yaml`/`config/example.env`/`Dockerfile` estesi; working tree non pubblicato): `OLO_RESET_TIMES` strict `HH:MM` (empty disabled), `OLO_RESET_TIMEZONE` IANA/UTC, `OLO_SCHEDULE_FILE` assoluto (default beside journal; Compose `/data/schedule.json`); `ScheduleStore` override persistente con short flock separato + scritture atomiche, corrupt fail closed senza fallback silenzioso; `set`/`clear`/`reset` recovery senza leggere payload corrotto; `set TIMES...` space-separated preferito; `plan_next`: `R=>R-18000` UTC, earliest reachable, skip se cooldown oltre `A+60`, intermediate solo se `now+cooldown<=A`, grace 60s mai early, DST gap skip/first-fold, `MAX_SEARCH_DAYS=4`; daemon idle-wait reload <=5s (non garantito durante RPC bloccante/confirm) + reread pre-attempt vincolante, wait heartbeat preserva blocked/degraded senza mascherarli; `check` aggiunge `schedule_*`/`next_target`/`next_activation*` e `effective_allow=allow AND cooldown==0 AND schedule.allow` (no-targets => pass-through); `show` solo short schedule lock + journal read-only senza lifetime lock, mai auth/send; `_boundary_retry` una sola fresh policy pair solo boundary-due originale entro `A-confirm..A+60`, mai inference retry; tzdata in immagine per ZoneInfo. Accettazione indipendente 190/190 COMPLETE, non deployato.
 
 ## Sottosistemi (verificati nei sorgenti)
 - Protocollo (`app/protocol.py`): stdio NDJSON su `codex app-server` — `initialize`+`initialized`, `account/read`, `account/rateLimits/read` (`excludeResetCreditDetails:true`, `supportsLunaReserve:false`), `model/list` paginato; gate `ensure_model` (id + effort esatti); `is_chatgpt_account` solo `type==chatgpt`. Errori sanificati a codici fissi.
@@ -33,4 +34,4 @@ Task ID: `openai_limit_optimizer_20260912_docs`
 - `https://raw.githubusercontent.com/openai/codex/rust-v0.154.0/codex-rs/backend-client/src/client.rs`
 
 ## Test (verificati in locale via stdlib)
-- `python -m unittest discover -s tests -t .` → **132 test OK** (78 unit + 54 acceptance), 2026-09-12.
+- Deployment corrente `reset_target_recovery_20260914` (closure COMPLETE): `python -m unittest discover -s tests -t .` → **190 test OK** (132 originali preservati 78+54; +15 executor `tests/unit/test_schedule.py`; +43 indipendenti: 17 `test_schedule_reset.py` + 13 `test_schedule_regression.py` + 13 `test_schedule_loop.py` 13/13). 43 anche con `-W error::ResourceWarning`. Loop `cmd_daemon(once=False)` fake-clock: 03:00→04:30 esatto target 09:30 poll600 confirm30/600; corrupt-override recovery live; alias timing/health/runtime; boundary mixed retry entro 60s; denial intermedio mai ore. Nessuna verifica live Codex/build/deploy/inference. Provenance canonica in README + `latest_session_work.md` (main-owned).

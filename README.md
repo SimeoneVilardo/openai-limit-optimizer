@@ -85,6 +85,9 @@ docker compose up -d
 | `OLO_RPC_TIMEOUT` | `60` | 5–300 |
 | `OLO_SEND_TIMEOUT` | `300` | 30–1800 |
 | `OLO_COOLDOWN_SECONDS` | `18000` | floor 18000, non-negotiable |
+| `OLO_RESET_TIMES` | `` (disabled) | comma-separated strict `HH:MM`, e.g. `09:30,14:30`; empty disables |
+| `OLO_RESET_TIMEZONE` | `UTC` | IANA zone, e.g. `Europe/Rome` |
+| `OLO_SCHEDULE_FILE` | `/data/schedule.json` | absolute runtime override path (Compose fixed); never inside `CODEX_HOME` |
 | `OLO_CODEX_BIN` | `codex` | |
 | `OLO_CODEX_HOME` | `/data/codex` | absolute, dedicated |
 | `OLO_STATE_FILE` | `/data/state.json` | absolute, never inside `CODEX_HOME` |
@@ -93,12 +96,56 @@ docker compose up -d
 
 Pinned constants (not configurable): 5s tolerance, 300min window, 18000s full.
 
+## Reset schedule
+
+Daily reset targets are best-effort scheduling gates: they can veto a send,
+never authorize one past the conservative policy/cooldown gates.
+
+```bash
+# env example (config/example.env, compose.yaml passes these through):
+OLO_RESET_TIMES=09:30,14:30
+OLO_RESET_TIMEZONE=Europe/Rome
+```
+
+A target `R` activates at `R - 18000` elapsed UTC seconds. Example: idle at
+03:00 with target 09:30 defers activation until 04:30 when feasible. Empty
+targets preserve standard scheduling (no schedule gate). DST gaps are skipped,
+ambiguous times use the first occurrence, lateness grace is 60s (never early).
+The earliest reachable target wins; an intermediate send is allowed only if its
+full cooldown fits before the next activation. The daemon re-reads the schedule
+file on short idle-loop waits (reload observed within 5s while idling); reload
+timing is not guaranteed during a blocking RPC or the confirm-seconds pair.
+The schedule is re-read immediately before each attempt, so a stale pre-RPC
+decision can never authorize a send. Exact live backend reset timing is
+unguaranteed: targets are best-effort scheduling gates only.
+
+Runtime commands (daemon may keep running; they use an independent short
+schedule lock, never the journal lifetime lock):
+
+```bash
+docker compose exec app python -m app.main schedule show
+docker compose exec app python -m app.main schedule set 09:30 14:30 --timezone Europe/Rome
+docker compose exec app python -m app.main schedule clear
+docker compose exec app python -m app.main schedule reset
+```
+
+- `set TIMES... [--timezone ZONE]`: persistent override, takes precedence
+  over env and survives restarts (space-separated times preferred).
+- `show`: read-only report (journal inspected read-only without its lifetime
+  lock; takes only the short schedule lock; no auth/send).
+- `clear`: persistent disable (empty override, distinct from `reset`).
+- `reset`: delete the override and restore the env configuration.
+- Corrupt override fails closed (`schedule-corrupt`); `check` reports
+  `schedule_*` fields and `effective_allow` is `allow AND cooldown==0 AND
+  schedule.allow`.
+
 ## Commands
 
 - `daemon [--once] [--dry-run]`: poll loop; `--dry-run` logs `would-send` without sending; holds the state lock for its whole lifetime.
-- `check [--dry-run]`: one poll+decision `{"ok","allow","effective_allow","reason","cooldown_remaining_s"}`; validates the journal (cooldown + corrupt) and holds the lock; does **not** write the journal, but may create/fix `CODEX_HOME` (0700) and the cache/auth under `CODEX_HOME` may be written by the server. `effective_allow` is `allow AND cooldown==0`: what the daemon would do.
+- `check [--dry-run]`: one poll+decision `{"ok","allow","effective_allow","reason","cooldown_remaining_s"}`; validates the journal (cooldown + corrupt) and holds the lock; does **not** write the journal, but may create/fix `CODEX_HOME` (0700) and the cache/auth under `CODEX_HOME` may be written by the server. `effective_allow` is `allow AND cooldown==0 AND schedule.allow`: what the daemon would do (with no targets configured, the schedule gate is pass-through).
 - `login`: device flow above; holds the lock.
 - `healthcheck`: reads the heartbeat (`healthy/degraded/blocked_auth/error` + `ts_wall`); exit 0/1/2.
+- `schedule show|set|clear|reset`: see Reset schedule above; `show` takes only the short schedule lock, inspects the journal read-only without its lifetime lock, and never authenticates or sends.
 
 ## Test
 
@@ -108,7 +155,21 @@ Stdlib only, no pytest:
 python -m unittest discover -s tests -t .
 ```
 
-132 tests (78 unit + 54 acceptance), verified locally with OK result.
+Test provenance (deployment `reset_target_recovery_20260914`, closure COMPLETE):
+final independent run **190 passed** (`python -m unittest discover -s tests -t .`):
+132 original (78 unit + 54 acceptance, preserved) + 15 executor
+(`tests/unit/test_schedule.py`) + 43 independent schedule
+(`tests/acceptance/test_schedule_reset.py` 17,
+`test_schedule_regression.py` 13, `test_schedule_loop.py` 13, incl. 13/13 loop).
+The 43 also pass with `ResourceWarning` as error. Earlier 164/blocked notes are
+historical and superseded. Real daemon-loop tests (fake wall+mono clocks through
+planner/poll/policy) verify 03:00 with target 09:30 and default poll 600 waking
+at exactly 04:30 for both confirm 30 and confirm 600; live corrupt-override
+recovery without restart; timing/health/runtime path aliases; bounded
+reset-boundary fresh-policy retry only when the original boundary-due plan,
+schedule, occurrence, cooldown and confirmation still fit inside the 60s grace
+(not an inference/send retry); intermediate fixed-active denials return after
+30s/two reads and never wait hours for a distant target.
 
 ## Security
 

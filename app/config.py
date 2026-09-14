@@ -4,12 +4,11 @@ All behaviour is driven by ``OLO_*`` environment variables so the Docker
 image stays portable. Every value is type-checked and bounds-checked;
 any invalid value fails closed with a visible error (no silent default).
 
-Path rules (fail closed): ``OLO_STATE_FILE``, ``OLO_HEARTBEAT_FILE`` and
-``OLO_CODEX_HOME`` must be absolute and pairwise distinct, and neither
-journal file may live inside ``CODEX_HOME`` (the model must never see
-our journal/heartbeat, and Codex config layers must never pick them
-up). The 5h cooldown floor (18000s) is not negotiable: shorter values
-are rejected.
+Path rules (fail closed): ``OLO_STATE_FILE``, ``OLO_HEARTBEAT_FILE``,
+``OLO_SCHEDULE_FILE`` and ``OLO_CODEX_HOME`` plus their lock/tmp sidecars
+must be absolute and pairwise distinct, and app data may not live inside
+``CODEX_HOME``. The 5h cooldown floor (18000s) is not negotiable: shorter
+values are rejected.
 """
 
 from __future__ import annotations
@@ -17,6 +16,8 @@ from __future__ import annotations
 import dataclasses
 import os
 import re
+
+from . import schedule as schedulemod
 
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
@@ -35,6 +36,11 @@ DEFAULTS = {
     "OLO_RPC_TIMEOUT": "60",
     "OLO_SEND_TIMEOUT": "300",
     "OLO_COOLDOWN_SECONDS": "18000",
+    "OLO_RESET_TIMES": "",
+    "OLO_RESET_TIMEZONE": "UTC",
+    # Empty means derive beside OLO_STATE_FILE.  Compose pins this to the
+    # visible /data/schedule.json path.
+    "OLO_SCHEDULE_FILE": "",
 }
 
 
@@ -52,6 +58,9 @@ class Config:
     rpc_timeout: int = 60
     send_timeout: int = 300
     cooldown_seconds: int = 18000
+    reset_times: tuple[str, ...] = ()
+    reset_timezone: str = "UTC"
+    schedule_file: str = "/data/schedule.json"
 
     # Pinned policy constants (not configurable by design).
     tolerance_seconds: int = 5
@@ -92,6 +101,32 @@ def _abspath(raw: str, name: str) -> str:
     return os.path.normpath(raw)
 
 
+def _validate_path_aliases(named_paths: list[tuple[str, str]]) -> None:
+    """Reject lexical, symlink-parent, and existing hardlink aliases."""
+    canonical = [(label, os.path.realpath(path))
+                 for label, path in named_paths]
+    for index, (label, path) in enumerate(named_paths):
+        for other_label, other_path in named_paths[index + 1:]:
+            if canonical[index][1] == os.path.realpath(other_path):
+                raise ConfigError(
+                    f"{label} and {other_label} resolve to the same path"
+                )
+            if not (os.path.lexists(path) and os.path.lexists(other_path)):
+                continue
+            try:
+                same = os.path.samefile(path, other_path)
+            except FileNotFoundError:
+                same = False
+            except OSError:
+                raise ConfigError(
+                    f"cannot validate {label}/{other_label} path identity"
+                )
+            if same:
+                raise ConfigError(
+                    f"{label} and {other_label} are the same file"
+                )
+
+
 def load(env: dict | None = None) -> Config:
     """Parse and validate configuration. Raises ConfigError on any problem."""
     src = dict(os.environ) if env is None else dict(env)
@@ -117,11 +152,55 @@ def load(env: dict | None = None) -> Config:
     rpc_timeout = _int(src, "OLO_RPC_TIMEOUT", 5, 300)
     send_timeout = _int(src, "OLO_SEND_TIMEOUT", 30, 1800)
     cooldown = _int(src, "OLO_COOLDOWN_SECONDS", MIN_COOLDOWN, 86400)
+    try:
+        reset_times = schedulemod.parse_reset_times(src.get("OLO_RESET_TIMES", ""))
+        reset_timezone = schedulemod.validate_timezone(
+            _get(src, "OLO_RESET_TIMEZONE")
+        )
+    except (ValueError, TypeError) as exc:
+        raise ConfigError(f"invalid reset schedule: {exc}")
+    raw_schedule = src.get("OLO_SCHEDULE_FILE", "")
+    if not isinstance(raw_schedule, str):
+        raise ConfigError("OLO_SCHEDULE_FILE must be a string")
+    if raw_schedule.strip():
+        schedule_file = _abspath(raw_schedule.strip(), "OLO_SCHEDULE_FILE")
+    else:
+        schedule_file = os.path.join(os.path.dirname(state_file), "schedule.json")
     if len({state_file, heartbeat_file, codex_home}) != 3:
         raise ConfigError("OLO_STATE_FILE, OLO_HEARTBEAT_FILE and "
                           "OLO_CODEX_HOME must all differ")
     for label, path in (("OLO_STATE_FILE", state_file),
                         ("OLO_HEARTBEAT_FILE", heartbeat_file)):
+        if os.path.commonpath([codex_home, path]) == codex_home:
+            raise ConfigError(f"{label} must not live inside OLO_CODEX_HOME")
+    # Runtime schedule data, its lock/tmp, the journal's lock/tmp, and the
+    # heartbeat must all remain distinct.  This also catches a custom
+    # schedule path accidentally replacing a journal sidecar.
+    named_paths = [
+        ("OLO_STATE_FILE", state_file),
+        ("OLO_STATE_FILE.lock", state_file + ".lock"),
+        ("OLO_STATE_FILE.tmp", state_file + ".tmp"),
+        ("OLO_HEARTBEAT_FILE", heartbeat_file),
+        ("OLO_HEARTBEAT_FILE.tmp", heartbeat_file + ".tmp"),
+        ("OLO_SCHEDULE_FILE", schedule_file),
+        ("OLO_SCHEDULE_FILE.lock", schedule_file + ".lock"),
+        ("OLO_SCHEDULE_FILE.tmp", schedule_file + ".tmp"),
+        ("OLO_CODEX_HOME", codex_home),
+    ]
+    if len({path for _label, path in named_paths}) != len(named_paths):
+        raise ConfigError("schedule and journal/heartbeat paths must all differ")
+    _validate_path_aliases(named_paths)
+    real_codex_home = os.path.realpath(codex_home)
+    for label, path in named_paths[:-1]:
+        try:
+            inside_home = (os.path.commonpath(
+                [real_codex_home, os.path.realpath(path)]
+            ) == real_codex_home)
+        except ValueError:
+            inside_home = False
+        if inside_home:
+            raise ConfigError(f"{label} must not live inside OLO_CODEX_HOME")
+    for label, path in (("OLO_SCHEDULE_FILE", schedule_file),):
         if os.path.commonpath([codex_home, path]) == codex_home:
             raise ConfigError(f"{label} must not live inside OLO_CODEX_HOME")
     return Config(
@@ -137,4 +216,7 @@ def load(env: dict | None = None) -> Config:
         rpc_timeout=rpc_timeout,
         send_timeout=send_timeout,
         cooldown_seconds=cooldown,
+        reset_times=reset_times,
+        reset_timezone=reset_timezone,
+        schedule_file=schedule_file,
     )
