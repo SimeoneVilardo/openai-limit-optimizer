@@ -1,5 +1,13 @@
 # Project Diary
 
+## 2026-09-15 — schedule release and homelab activation
+
+- Re-ran an independent 190-test release gate before publication; no blocking defects were found.
+- Pushed source revision `b97486f` to `master`, built the amd64 image on the homelab Docker Engine and published immutable `sha-b97486f` plus `latest` at digest `sha256:375d54eb8497fc3c23a36e0199e42feeda87e971d199045e7010910174d2e550`.
+- Updated the existing image-only Compose deployment while preserving private auth/journal data. A first pin rewrite incorrectly let Perl interpret `@sha256`; Compose rejected the resulting nonexistent tag before container recreation. Escaping `@` fixed the pin and the controlled retry completed.
+- Set the persistent runtime override to `09:30 Europe/Rome`. Live verification confirmed healthy daemon, exact revision/digest, non-root read-only confinement, no ports and secure schedule/state permissions.
+- The pre-existing cooldown made today's activation miss the 60-second grace, so selecting tomorrow's target was the expected fail-closed result. No inference was forced to manufacture acceptance evidence.
+
 ## 2026-09-14 — recovery completed and full-loop acceptance
 
 - Treat terminal workflow errors as evidence to investigate, not an excuse to abandon the user's feature. Sanitized logs identified a provider-header timeout misclassified as unknown; a separately delegated repair and independent gate enabled controlled same-child continuation. Workflow implementation details are canonical in the global OpenCode framework.

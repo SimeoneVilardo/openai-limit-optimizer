@@ -1,14 +1,15 @@
 # Project Progress
 
-## Current delivery — source implementation accepted
+## Current delivery — released and deployed
 
-Updated: 2026-09-14. Deployment `reset_target_recovery_20260914`, Heavy, **complete** for source implementation and independent automated verification. Earlier blocked records below are historical.
+Updated: 2026-09-15. Deployment `reset_target_release_20260915`, **complete**. Earlier source-only and blocked records below are historical.
 
-- Daily target scheduling, persistent runtime commands, timezone/DST behavior, conservative gating, Compose/env wiring and Docker timezone support are implemented. Contracts belong in `project_core_tech.md` and user operation in README.
-- Final independent gate: `python -m unittest discover -s tests -t .` **190/190 passed**, preserving all 132 original tests. The 43 independent schedule tests also pass with ResourceWarning treated as error.
-- Real daemon-loop tests with fake time/transport verify 03:00 → exact 04:30 activation for a 09:30 target with confirm30 and confirm600, live corrupt-override recovery, runtime edits, unchanged safety gates and bounded reset-boundary fresh-policy retry. No claim of observed live provider timing.
-- Workflow timeout misclassification was diagnosed and repaired rather than abandoned. Independent dispatcher gate: **62/62**, typecheck and registration smoke passed. Canonical repair evidence: `/home/simeone/.config/opencode/agent_docs/latest_session_work.md`. Restart OpenCode to load that plugin repair; current app verification resumed successfully through the same stopped tester child after diagnosis.
-- No image build, publication, service change, live inference, commit or push. Existing user work preserved. Next optional milestone: build/release/deploy the accepted source when requested, then observe a natural live idle/reset transition without relaxing policy.
+- Source commit `b97486f80edb60ed54bcdefa4e13179dcda7a49b` is pushed to public `SimeoneVilardo/openai-limit-optimizer`, branch `master`.
+- Final independent gate: `python -m unittest discover -s tests -v` **190/190 passed**, with no release-blocking finding.
+- Docker Hub tags `latest` and `sha-b97486f` share digest `sha256:375d54eb8497fc3c23a36e0199e42feeda87e971d199045e7010910174d2e550`; the image carries the full source revision label.
+- `/home/simeone/openai-limit-optimizer/docker-compose.yml` on `homelab.lan` pins that digest. The recreated daemon is healthy, non-root, read-only, has no published ports and retains the private `/data` bind mount.
+- Persistent runtime schedule override is `09:30` in `Europe/Rome`. At verification the current cooldown made the 2026-09-15 activation unreachable, so the conservative planner selected the 2026-09-16 09:30 target (04:30 local activation) rather than forcing or advancing an attempt.
+- No live inference was forced. Exact provider reset timing remains unguaranteed; observe the next natural idle transition without relaxing policy.
 
 ## Deployment `reset_target_scheduling_20260914` — blocked at entry
 

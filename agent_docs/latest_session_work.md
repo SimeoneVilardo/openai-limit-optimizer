@@ -1,5 +1,16 @@
 # Latest Session Work
 
+## Current handoff — release and homelab deployment complete
+
+Date: 2026-09-15. Deployment `reset_target_release_20260915`, closure **complete**.
+
+- Independent release gate passed all 190 tests and found no release-blocking defect. Source commit `b97486f80edb60ed54bcdefa4e13179dcda7a49b` is on `origin/master`.
+- Docker Hub `latest` and `sha-b97486f` resolve to `sha256:375d54eb8497fc3c23a36e0199e42feeda87e971d199045e7010910174d2e550`. The image was built on the homelab amd64 engine and carries the full Git revision label.
+- Homelab Compose and its private `.env` image pin were updated without reading credential/state content. The existing `/data` bind mount was preserved; `state.json` and new `schedule.json` are owner `65532:65532`, mode 0600.
+- Container verification: running and healthy, `unless-stopped`, user `65532:65532`, read-only root, no published ports, network `openai-limit-optimizer_default`.
+- Runtime override `09:30 Europe/Rome` is persisted and visible through `schedule show`. Existing cooldown skipped the narrowly unreachable 2026-09-15 activation and selected 2026-09-16 at 04:30 local for the 09:30 target, as designed.
+- No live inference was forced and no exact backend reset behavior is claimed.
+
 ## Current handoff — recovery and source acceptance complete
 
 Date: 2026-09-14. Deployment `reset_target_recovery_20260914`, Heavy, closure **complete**. This supersedes the historical blocked records retained below.
